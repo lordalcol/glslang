@@ -3399,8 +3399,13 @@ void TGlslangToSpvTraverser::createAbortEXT(const glslang::TIntermSequence &glsl
     unsigned int paddingSize = (4 - msgLen % 4) % 4;
     msgLen = msgLen + paddingSize;
     spv::Id constLen = builder.makeUintConstant(msgLen);
-    // 2.2 Get string's array type.
+    // 2.2 Get string's array type. A second, distinct type is used for the message struct's
+    //     load-type member below: SPV_KHR_constant_data requires OpConstantDataKHR's result
+    //     type to have no explicit layout (its data is tightly packed), while the message
+    //     struct's member needs an explicit ArrayStride. The two requirements can't both
+    //     apply to a single type, so the SPV_KHR_abort spec's own example uses two.
     auto msgArrType = builder.makeArrayType(charType, constLen, 1);
+    auto msgLoadArrType = builder.makeArrayType(charType, constLen, 1);
     // 2.3 Add string constant data.
     //     SPV_KHR_abort does not mandate a form for the message; it is emitted as plain
     //     constant data. Its example uses a specialization constant so that an application
@@ -3409,11 +3414,13 @@ void TGlslangToSpvTraverser::createAbortEXT(const glslang::TIntermSequence &glsl
     auto msgConstData = builder.createConstData(spv::Op::OpConstantDataKHR, msgArrType, {msg->c_str()});
     // 2.4 Add decoration for this string.
     builder.addDecoration(msgArrType, spv::Decoration::UTFEncodedKHR);
-    // Array stride for char is 1 byte per element for explicit layout
-    builder.addDecoration(msgArrType, spv::Decoration::ArrayStride, 1);
+    builder.addDecoration(msgLoadArrType, spv::Decoration::UTFEncodedKHR);
+    // Array stride for char is 1 byte per element for explicit layout. This goes on the
+    // load-type array only: OpConstantDataKHR's result type (msgArrType) must not have one.
+    builder.addDecoration(msgLoadArrType, spv::Decoration::ArrayStride, 1);
     // 2.5 Collect data and type for construct an internal message structure member.
     structMemberType.push_back(msgArrType);
-    structLoadMemberType.push_back(msgArrType);
+    structLoadMemberType.push_back(msgLoadArrType);
     structMemberOffsets.push_back(msgLen);
     structMemberData.push_back(msgConstData);
     // 3. Add extra following arguments/variables' types in member structure.
